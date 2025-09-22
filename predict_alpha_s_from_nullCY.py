@@ -9,6 +9,7 @@ Workflow:
   4) DERIVE both spectra at this μ0 (calls derive_spectrum_from_nullCY.py --mu0 ... )
   5) run guard on μ0
   6) compute thresholds (Δ_GUT from heavy, Δ_MSUSY from SUSY), 2-loop RG with Yukawas
+     • NEW: optionally override Δ_GUT via --thresholds-json or env NCY_GUT_THRESHOLDS_JSON
   7) print αs(MZ)
 
 No αs input, no Δ-matching, no mass scaling scripts. Artifacts MUST carry provenance.
@@ -16,6 +17,7 @@ No αs input, no Δ-matching, no mass scaling scripts. Artifacts MUST carry prov
 
 import json, math, subprocess, shlex, os, importlib.util, sys
 from pathlib import Path
+import argparse  # NEW
 
 # --- constants and helpers
 pi = math.pi
@@ -115,7 +117,25 @@ def _load_artifact_entries(path: Path):
     data = json.loads(path.read_text())
     return data["entries"], data["provenance"]
 
+# NEW: optional thresholds override
+def _maybe_load_thresholds_override(path: Path):
+    if path.exists():
+        try:
+            obj = json.loads(path.read_text())
+            D = obj.get("Delta_GUT_inv_alpha") or obj  # allow raw dict or the wrapper
+            d1 = float(D["d1"]); d2 = float(D["d2"]); d3 = float(D["d3"])
+            return [d1, d2, d3]
+        except Exception as e:
+            print(f"[warn] Failed to parse thresholds override at {path}: {e}")
+    return None
+
 def main():
+    # CLI: allow --thresholds-json; also honor env NCY_GUT_THRESHOLDS_JSON
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--thresholds-json", type=str, default=os.environ.get("NCY_GUT_THRESHOLDS_JSON", ""))
+    args = ap.parse_args()
+    override_path = Path(args.thresholds_json) if args.thresholds_json else None
+
     # 1) EW inputs
     ew = json.loads(Path("inputs/ew_targets.json").read_text())
     inv_alpha_EM = float(ew["inv_alpha_EM_MZ"]); sin2w = float(ew["sin2thetaW_MZ"])
@@ -139,8 +159,16 @@ def main():
     heavy_entries, _ = _load_artifact_entries(Path("inputs/heavy_spectrum.json"))
     susy_entries,  _ = _load_artifact_entries(Path("inputs/susy_spectrum.json"))
 
-    # 5) Build Δ thresholds
-    Delta_GUT = TH.delta_inverse_alpha_from_spectrum(mu0, heavy_entries)
+    # 5) Build Δ thresholds (GUT: from spectrum unless overridden; SUSY: from spectrum)
+    Delta_GUT = None
+    if override_path:
+        Delta_GUT = _maybe_load_thresholds_override(override_path)
+        if Delta_GUT:
+            print(f"[info] Using Δ_GUT override from {override_path}")
+    if Delta_GUT is None:
+        # default: compute from heavy spectrum via thresholds_kl
+        Delta_GUT = TH.delta_inverse_alpha_from_spectrum(mu0, heavy_entries)
+
     Delta_MS  = TH.delta_MSUSY_inverse_alpha(MSUSY, susy_entries)
 
     # 6) UV boundary at μ0 including Δ_GUT (inverse-alpha)
