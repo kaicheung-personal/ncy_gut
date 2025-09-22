@@ -1,0 +1,13 @@
+# derived artifacts & outputs
+inputs/heavy_spectrum.json
+inputs/susy_spectrum.json
+results/*
+!results/.gitkeep
+
+# local/ephemeral
+*.pyc
+__pycache__/
+.DS_Store
+.env
+.venv
+
